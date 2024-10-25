@@ -11,142 +11,75 @@ import {FilterMatchMode} from "@primevue/core/api";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 import localizedFormat from "dayjs/plugin/localizedFormat";
-import 'dayjs/locale/es';
+
 
 // Icon imports
 import {faMagnifyingGlass} from "@fortawesome/free-solid-svg-icons";
-import {
-  faFile,
-  faFileAlt,
-  faFileExcel,
-  faFileImage,
-  faFilePdf,
-  faFilePowerpoint,
-  faFileWord,
-  faFolder,
-  faFolderOpen,
-} from "@fortawesome/free-regular-svg-icons";
-import {buildBreadcrumbMenuItems} from "./utils/navigationUtils.js";
+import {faFolder, faFolderOpen,} from "@fortawesome/free-regular-svg-icons";
+import {createBreadcrumbMenuItems} from "./utils/navigationUtils.js";
+import {determineFileIcon} from "./utils/fileUtils.js";
+import {formatToLocal} from "./utils/dateUtils.js";
 
 // Configuración de Day.js
 dayjs.extend(utc);
 dayjs.extend(localizedFormat);
-dayjs.locale("es");
 
 // Variables constantes para configuraciones de SharePoint
 const SHAREPOINT_LIST_NAME = "Acreditación";
 
 // Variables reactivas para estado y datos de la aplicación
-const listViewDetails = ref(null);
+const defaultViewDetails = ref();
 const selectedFolder = ref(null);
 const searchFilters = ref({ global: { value: null, matchMode: FilterMatchMode.CONTAINS }});
 const isLoading = ref(false);
 const rootFolders = ref([]);
 const allFiles = ref([]);
 
+/**
+ * Initializes search filters.
+ */
 const initFilters = () => {
   searchFilters.value = {
     global: { value: null, matchMode: FilterMatchMode.CONTAINS },
   };
 };
 
-const formatToLocal = (dateStr, template) => {
-  const date = dayjs(dateStr);
-  if (date.isValid()) {
-    return date.format(template);
-  } else {
-    return dateStr;
-  }
-};
-
-const formatMenuItem = (serverRelativeUrl) => {
-  let baseRelativeUrl = selectedFolder.value.ServerRelativeUrl;
-  const viewDetails = listViewDetails.value;
-
-  // Remove base relative URL to get only the remaining path
-  const url = serverRelativeUrl.replace(baseRelativeUrl, "");
-  const parts = url.split("/").filter((part) => part);
-  parts.pop();
-
-  const menuItems = [];
-  parts.forEach((folder) => {
-    // Ensure there's always a trailing slash in baseRelativeUrl
-    if (!baseRelativeUrl.endsWith("/")) {
-      baseRelativeUrl += "/";
-    }
-
-    baseRelativeUrl += folder + "/";
-    menuItems.push({
-      label: folder,
-      url: `${viewDetails.ServerRelativeUrl}?RootFolder=${encodeURIComponent(
-        baseRelativeUrl
-      )}&FolderCTID=${FOLDER_CTID}&View=${encodeURIComponent(
-        "{" + viewDetails.Id.toUpperCase() + "}"
-      )}`,
-      target: "_blank",
-    });
-  });
-
-  return menuItems;
-};
-
-const getIconByFilename = (fileName) => {
-  const extension = fileName.split(".").pop().toLowerCase();
-
-  switch (extension) {
-    case "pdf":
-      return faFilePdf;
-    case "jpg":
-    case "jpeg":
-    case "png":
-    case "gif":
-      return faFileImage;
-    case "doc":
-    case "docx":
-      return faFileWord;
-    case "xls":
-    case "xlsx":
-      return faFileExcel;
-    case "ppt":
-    case "pptx":
-      return faFilePowerpoint;
-    case "txt":
-      return faFileAlt;
-    default:
-      return faFile;
-  }
+/**
+ * Creates breadcrumb links based on the server relative URL.
+ * @param {string} serverRelativeUrl - The server relative URL of the folder.
+ * @returns {Array} - The breadcrumb menu items.
+ */
+const getBreadcrumbLinks = (serverRelativeUrl) => {
+  return createBreadcrumbMenuItems(serverRelativeUrl, selectedFolder.value.ServerRelativeUrl, defaultViewDetails.value);
 };
 
 onMounted(async () => {
-  listViewDetails.value = await fetchDefaultViewByListName(SHAREPOINT_LIST_NAME);
-  rootFolders.value = await fetchRootFoldersByListName(SHAREPOINT_LIST_NAME);
+  // Fetch default view details and root folders on component mount
+  defaultViewDetails.value = await fetchDefaultViewByListName(SHAREPOINT_LIST_NAME);
+
+  // Fetch root folders and filter those with ItemCount > 0
+  const allRootFolders = await fetchRootFoldersByListName(SHAREPOINT_LIST_NAME);
+  rootFolders.value = allRootFolders.filter(folder => folder.ItemCount > 0);
 });
 
-watch(selectedFolder, async (unit) => {
-  if (unit) {
+watch(selectedFolder, async (folder) => {
+  if (folder) {
+    // Reset filters and loading state
     initFilters();
     allFiles.value = new Array(6);
     isLoading.value = true;
-    console.log("unit: ", unit);
-    const rootFolder = await fetchFilesByFolderId(unit.UniqueId);
 
-    console.log("rootFolder Folders: ", rootFolder.Folders);
-    console.log("rootFolder Files: ", rootFolder.Files);
+    // Fetch files in the selected folder and any subfolders
+    const folderContents = await fetchFilesByFolderId(folder.UniqueId);
+    let virtualFiles = [...folderContents.Files.results];
 
-    let _virtualFiles = [];
-    _virtualFiles.concat(rootFolder.Files.results);
-
-    for (const folder of rootFolder.Folders.results) {
-      // files.value = _virtualFiles
-      console.log("folder: ", folder);
-
-      const folderFiles = await fetchFilesRecursively(folder.UniqueId);
-      _virtualFiles = _virtualFiles.concat(folderFiles);
+    for (const subfolder of folderContents.Folders.results) {
+      const subfolderFiles = await fetchFilesRecursively(subfolder.UniqueId);
+      virtualFiles = [...virtualFiles, ...subfolderFiles];
     }
 
-    allFiles.value = _virtualFiles;
-
-    isLoading.value = false;
+    allFiles.value = virtualFiles; // Update all files state
+    isLoading.value = false; // Set loading state to false
   }
 });
 </script>
@@ -161,7 +94,6 @@ watch(selectedFolder, async (unit) => {
           :options="rootFolders"
           :invalid="!selectedFolder"
           optionLabel="Name"
-          variant="filled"
           fluid
           class="block w-full rounded-md border-0"
         >
@@ -209,7 +141,7 @@ watch(selectedFolder, async (unit) => {
           <div v-else class="flex items-center mt-4">
             <div class="flex items-center justify-center mr-4">
               <FontAwesomeIcon
-                :icon="getIconByFilename(slotProps.data.Name)"
+                :icon="determineFileIcon(slotProps.data.Name)"
                 size="2x"
               />
             </div>
@@ -224,7 +156,7 @@ watch(selectedFolder, async (unit) => {
               </div>
               <div>
                 <Breadcrumb
-                  :model="formatMenuItem(slotProps.data.ServerRelativeUrl)"
+                  :model="getBreadcrumbLinks(slotProps.data.ServerRelativeUrl)"
                   class="my-breadcrumb-style"
                 />
               </div>
@@ -241,7 +173,7 @@ watch(selectedFolder, async (unit) => {
         <template #body="slotProps">
           <Skeleton v-if="isLoading"></Skeleton>
           <div v-else>
-            {{ formatToLocal(slotProps.data.TimeLastModified, "L") }}
+            {{ formatToLocal(slotProps.data.TimeLastModified, "es", "L") }}
           </div>
         </template>
       </Column>

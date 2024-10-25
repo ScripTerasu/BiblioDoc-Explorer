@@ -46,9 +46,9 @@ export const fetchRootFoldersByListName = async (listName) => {
  * @returns {Promise<object>} The folder data.
  * @throws {Error} If the request fails.
  */
-export const fetchFilesByFolderId = async (folderID) => {
+export const fetchFilesByFolderId = async (folderId) => {
     try {
-        const response = await sharepointClient.get(`/_api/Web/getFolderById('${folderID}')?$select=*&$expand=Folders,Files,Files/ModifiedBy`);
+        const response = await sharepointClient.get(`/_api/Web/getFolderById('${folderId}')?$select=*&$expand=Folders,Files,Files/ModifiedBy`);
         return response.data.d;
     } catch (error) {
         console.error(`Error retrieving files from folder with ID '${folderId}':`, error);
@@ -67,7 +67,7 @@ export const fetchFilesRecursively = async (folderId) => {
         let collectedFiles = folderData.Files.results;
 
         for (const subFolder of folderData.Folders.results) {
-            const subFolderFiles = fetchFilesRecursively(subFolder.UniqueId);
+            const subFolderFiles = await fetchFilesRecursively(subFolder.UniqueId);
             collectedFiles = collectedFiles.concat(subFolderFiles);
         }
 
