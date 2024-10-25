@@ -246,7 +246,4 @@ watch(selectedFolder, async (folder) => {
   @apply text-fuchsia-700 hover:text-fuchsia-900 focus:text-fuchsia-800 !important;
 }
 
-.p-togglebutton {
-  @apply col-span-12 md:col-span-4 xl:col-span-2  !important;
-}
 </style>
